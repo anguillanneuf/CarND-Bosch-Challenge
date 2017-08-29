@@ -311,7 +311,7 @@ double getRoadCurvature(double ix, double iy, double itheta, vector<double> maps
 }
 
 // Generate anchor points (s,d) at the end of the previous path, look behind rather than looking ahead.
-vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sensor_fusion, int lane, double ego_speed){
+vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sensor_fusion, int lane, double ego_speed, double ego_s){
 
     vector<int> lanes; // lanes to consider
     lanes.push_back(lane-1); lanes.push_back(lane+1);
@@ -329,6 +329,14 @@ vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sens
                     cars_in_lane_sf.push_back(sf);
                 }
             }
+
+            // if any of them in the way of a lane change
+            bool in_the_way;
+            for (auto sf: cars_in_lane_sf){
+                if (sf[5] > ego_s && sf[5] - ego_s < 15)
+                    in_the_way = true;
+            }
+
 
             vector<double> time_to_pass; // how long it would take for any car in this lane that's 60m behind to overtake Ego under 1.5 seconds
             vector<double> pass_id; // their IDs
@@ -353,19 +361,8 @@ vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sens
 
             cout << "Lane " << l << ": " << marks.size() << " cars to overtake Ego in 1.5 seconds" << endl;
 
-            // if no such cars are found, generate some anchor points beyond the end of the previous path in this lane
-            if(marks.size() < 1){
 
-                // drop an anchor point every 1m apart from the end of the previous path to 30m beyond that
-                for (double j = car_s; j < car_s + 30; j += 1){
-                    bool ok_to_drop = true;
-                    if ((j > car_s && j - car_s < 10) || (car_s > j && car_s - j < 30) )
-                        ok_to_drop = false;
-                    if (ok_to_drop)
-                        anchors.push_back({j, (double)2 + l * 4});
-                }
-
-            } else { // if such cars are found, generate some anchor points behind each one of them if no other cars are close behind
+            if (marks.size() < 1) { // if such cars are found, generate some anchor points behind each one of them if no other cars are close behind
 
                 for (double j = car_s; j < car_s + 30; j += 1){
                     bool ok_to_drop = true;
@@ -386,6 +383,15 @@ vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sens
                     if (ok_to_drop)
                         anchors.push_back({j, (double)2 + l * 4});
                 }
+            } else if (in_the_way) {
+                // if no such cars are found, and there are no cars right next to ego
+                // generate some anchor points beyond the end of the previous path in this lane
+
+                // drop an anchor point every 4m apart from the end of the previous path to 30m beyond that
+                for (double j = car_s; j < car_s + 30; j += 4){
+                    anchors.push_back({j, (double)2 + l * 4});
+                }
+
             }
 
             cout << "lane " << l << ": " << anchors.size()-temp_anchors_count << " anchors" << endl;
@@ -474,7 +480,7 @@ vector<vector<double>> generateTrajectory(vector<double> sd, vector<double> prev
 
 // calculate cost
 double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> ego_readings, vector<vector<double>> sensor_fusion,
-                     int ego_cur_lane, int ego_goal_lane, double slow_car_speed, double slow_car_s){
+                     int ego_cur_lane, int ego_goal_lane, double slow_car_speed, double slow_car_s, int prev_size){
 
     double cost = 0.0;
 
@@ -502,7 +508,7 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
 
     double closest_dist_ahead = 999;
 
-    int timesteps = 0;
+    int timesteps = prev_size+5;
     double center_line; // line between current lane and goal lane
     double s_i = 0.0;
 
@@ -514,7 +520,7 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
 
     // find out the time steps it takes for ego to go to the edge of its lane
     for (int i = 0; i < s.size(); i ++){
-        if (abs(d[i]-center_line)<1.0){
+        if (abs(d[i]-center_line)<1.5){
             timesteps = i;
             s_i = s[i];
             break;
@@ -533,13 +539,15 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
         double check_car_s_i = check_car_s0 + ((double)timesteps * 0.02 * check_car_speed);
 
         // check collision, by the time ego is close to the center line, how distant are other cars?
-        if(abs(check_car_s_i - s_i) < 15.0 && ego_goal_lane == check_car_lane){
+        if(//abs(check_car_s_i - s_i) < 15.0 &&
+           ((check_car_s_i > s_i && check_car_s_i - s_i < 30) || (check_car_s_i < s_i && s_i - check_car_s_i < 5))
+           && ego_goal_lane == check_car_lane){
             colli = 10.0;
             goto Out;
         }
 
         // check both cur_lane and goal_lane for collision and update buffer
-        if ((ego_goal_lane == check_car_lane) || (ego_cur_lane == check_car_lane)){
+        if (ego_goal_lane == check_car_lane){
 
             if ((ego_end_s > check_car_s && ego_end_s - check_car_s < 15 ) || (ego_end_s < check_car_s && check_car_s - ego_end_s < 15)){
                 colli = 10.0;
@@ -726,9 +734,10 @@ int main() {
                             check_car_s = check_car_s0 + ((double)prev_size*0.02*check_speed); // when ego gets to the end of
                             // the previous trajectory, where would the other car be
 
-                            if ((ego.state == "KL") && (check_car_s > car_s) && (check_car_s - car_s < 30) && (check_car_s0 > car_s0)){
+                            if ( (check_car_s0 > car_s0) && ((check_car_s >= car_s && check_car_s - car_s < 40)||(check_car_s < car_s))){
 
-                                too_close_ahead = true;
+                                if (check_car_s0 - car_s0 < 50)
+                                    too_close_ahead = true;
                                 // determine the speed of the first car ahead
                                 if ((check_car_s - car_s) < closest_distance){
                                     closest_distance = check_car_s - car_s;
@@ -736,21 +745,16 @@ int main() {
                                     check_car_ahead_s = check_car_s0;
                                 }
                             }
-
-                            if(((check_car_s < car_s) && (car_s - check_car_s < 15) && (check_car_s0 < car_s0))){
-                                too_close_behind = true;
-                                check_car_behind_vs = check_speed;
-                            }
                         }
                     }
 
-                    if ((too_close_ahead)&&(ego.state=="KL")){
+                    if (too_close_ahead ){
                         ref_v -= 0.25;
-                    } else if (ref_v < 49.5 ){
+                    } else if (ref_v < 49.8 ){
                         ref_v += 0.25; // more efficient if done in below
                     }
 
-                    ref_v = min(ref_v, 49.5);
+                    ref_v = min(ref_v, 49.8);
 
                     vector<double> ptsx;
                     vector<double> ptsy;
@@ -777,7 +781,7 @@ int main() {
 
                     if (ego.state == "LCL") {
 
-                        if (abs(ego.goal_lane * 4 + 2 - car_d) < 1.0 && car_s0 - ego.goal_s > 45.0){
+                        if (abs(ego.goal_lane * 4 + 2 - car_d) < 1.0 && car_s0 - ego.goal_s > 30.0){
                             cout << "LCL completed" << endl;
                             ego.state = "KL";
                             goto KL;
@@ -788,7 +792,7 @@ int main() {
                         }
                     } else if (ego.state == "LCR") {
 
-                        if (abs(ego.goal_lane * 4 + 2 - car_d) < 1.0 && car_s0 - ego.goal_s > 45.0){
+                        if (abs(ego.goal_lane * 4 + 2 - car_d) < 1.0 && car_s0 - ego.goal_s > 30.0){
                             cout << "LCR completed" << endl;
                             ego.state = "KL";
                             goto KL;
@@ -797,7 +801,7 @@ int main() {
                             trajectory = generateTrajectory({car_s, car_d}, previous_path_x, previous_path_y, ref_v, ego.goal_lane,
                                                             map_waypoints_s, map_waypoints_x, map_waypoints_y);
                         }
-                    } else if ((car_speed < 45.0) && (too_close_ahead) && (check_car_ahead_vs < 45.0/2.24) && curvature > 800.0 ) {
+                    } else if (abs(car_speed-check_car_ahead_vs*2.24)<2 && (too_close_ahead) && (check_car_ahead_vs < 45.0/2.24) && curvature > 800.0 ) {
 
                         cout << "Choosing ..." << endl;
                         vector<vector<double>> anchors;
@@ -805,7 +809,7 @@ int main() {
                         vector<double> costs;
                         double cost = 9999;
 
-                        anchors = generateAnchors(car_s, sensor_fusion, cur_lane, car_speed/2.24);
+                        anchors = generateAnchors(car_s, sensor_fusion, cur_lane, car_speed/2.24, car_s0);
 
 
                         for (auto anchor: anchors) {
@@ -820,7 +824,7 @@ int main() {
                             ego_readings = getTrajectoryReadings(temp_trajectory, map_waypoints_x, map_waypoints_y);
 
                             double temp_cost = calculateCost(temp_trajectory, ego_readings, sensor_fusion, cur_lane,
-                                                             temp_lane, check_car_ahead_vs, check_car_ahead_s);
+                                                             temp_lane, check_car_ahead_vs, check_car_ahead_s, prev_size);
 
                             costs.push_back(temp_cost);
 
