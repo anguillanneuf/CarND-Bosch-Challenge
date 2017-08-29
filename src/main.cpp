@@ -19,7 +19,7 @@ struct Ego{
     string state; // "KL": Keep Lane, "PLCL": Prepare Lane Change Left, "PLCR": Prepare Lane Change Right, "LCL": Lane Change Left, "LCR": Lane Change Right
     int goal_lane;
     double goal_s; // how far along the goal lane Ego is to travel, used when state is "LCL" or "LCR"
-    double ego_prev_path_end_v;
+    double ego_prev_path_end_v; // mph
 };
 
 // For converting back and forth between radians and degrees.
@@ -201,7 +201,7 @@ vector<double> getFrenetFromTrajectory(vector<vector<double>> trajectory, vector
 }
 
 // Get trajectory readings s[], d[], v[], a[], j[], given a trajectory (x[],y[])
-vector<vector<double>> getTrajectoryReadings(vector<vector<double>> trajectory, vector<double> maps_x, vector<double> maps_y){
+vector<vector<double>> getTrajectoryReadings(vector<vector<double>>& trajectory, vector<double>& maps_x, vector<double>& maps_y){
 
     vector<double> x, y, theta, s, d, vx, vy, vxy, vs, vd, vsd, ax, ay, axy, as, ad, asd, jx, jy, jxy, js, jd, jsd;
 
@@ -292,7 +292,7 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals, int order)
 }
 
 // Find road curvature
-double getRoadCurvature(double ix, double iy, double itheta, vector<double> maps_x, vector<double> maps_y){
+double getRoadCurvature(double ix, double iy, double itheta, vector<double>& maps_x, vector<double>& maps_y){
 
     Eigen::VectorXd x(10), y(10);
 
@@ -356,7 +356,7 @@ vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sens
                 }
             }
 
-            cout << "Lane " << l << ": " << marks.size() << " cars to overtake Ego in 1.5 seconds" << endl;
+//            cout << "Lane " << l << ": " << marks.size() << " cars to overtake Ego in 1.5 seconds" << endl;
 
             // if no such cars are found, generate some anchor points beyond the end of the previous path in this lane
             if(marks.size() < 1){
@@ -393,7 +393,7 @@ vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sens
                 }
             }
 
-            cout << "lane " << l << ": " << anchors.size()-temp_anchors_count << " anchors" << endl;
+//            cout << "lane " << l << ": " << anchors.size()-temp_anchors_count << " anchors" << endl;
             temp_anchors_count = anchors.size()-temp_anchors_count;
         }
     }
@@ -403,7 +403,7 @@ vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sens
 
 // Generate trajectory (x,y) from anchor (s, d)
 vector<vector<double>> generateTrajectory(vector<double> sd, vector<double> prev_path_x, vector<double> prev_path_y, double& car_v, double ref_v, int goal_lane,
-                                          vector<double> maps_s, vector<double> maps_x, vector<double> maps_y){
+                                          vector<double>& maps_s, vector<double>& maps_x, vector<double>& maps_y){
 
     vector<vector<double>> trajectory;
     vector<double> pts_x, pts_y;
@@ -422,7 +422,6 @@ vector<vector<double>> generateTrajectory(vector<double> sd, vector<double> prev
 
     // add another four points to pts_x and pts_y
     for (int i = 1; i < 4; i ++){
-//        vector<double> xy = getXY(sd[0]+30*i, sd[1], maps_s, maps_x, maps_y);
         vector<double> xy = getXY(sd[0]+30*i, (2+4*goal_lane), maps_s, maps_x, maps_y);
 
         pts_x.push_back(xy[0]);
@@ -453,21 +452,18 @@ vector<vector<double>> generateTrajectory(vector<double> sd, vector<double> prev
     double target_distance = sqrt(target_x*target_x+target_y*target_y);
     double x_add_on = 0.0;
 
-
     // go from car_v to ref_v using max acceleration or deceleration
     vector<double> dynamic_v;
     dynamic_v.push_back(car_v);
     if (car_v <= ref_v){
         while (dynamic_v[dynamic_v.size()-1] < ref_v){
-            dynamic_v.push_back(dynamic_v[dynamic_v.size()-1]+0.15);
+            dynamic_v.push_back(dynamic_v[dynamic_v.size()-1]+0.25);
         }
     } else {
         while (dynamic_v[dynamic_v.size()-1] > ref_v){
-            dynamic_v.push_back(dynamic_v[dynamic_v.size()-1]-0.15);
+            dynamic_v.push_back(dynamic_v[dynamic_v.size()-1]-0.25);
         }
     }
-
-    cout << dynamic_v[0] << ", " << dynamic_v[1] << "..." << dynamic_v[dynamic_v.size()-1] << endl;
 
     for(int i = 0; i < 60; i++){
         dynamic_v.push_back(dynamic_v[dynamic_v.size()-1]);
@@ -475,9 +471,6 @@ vector<vector<double>> generateTrajectory(vector<double> sd, vector<double> prev
 
     // add on to previous path using points from spline
     for (int i = 0; i <= 60 - prev_path_x.size(); i ++){
-
-//        double N = target_distance/(ref_v/2.24*0.02);
-//        double x_point = x_add_on + target_x/N;
 
         double x_point = x_add_on + target_x/target_distance*dynamic_v[i]/2.24*0.02;
         double y_point = s(x_point);
@@ -496,7 +489,6 @@ vector<vector<double>> generateTrajectory(vector<double> sd, vector<double> prev
 
     car_v = dynamic_v[50-prev_path_x.size()];
     trajectory.resize(50);
-
     return trajectory;
 }
 
@@ -512,7 +504,7 @@ bool check_safe_buffer(double me, double other){
 // calculate cost
 double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> ego_readings, vector<vector<double>> sensor_fusion,
                      int ego_cur_lane, int ego_goal_lane, double slow_car_speed, double slow_car_s,
-                     vector<double> maps_x, vector<double> maps_y){
+                     vector<double>& maps_x, vector<double>& maps_y){
 
     double cost = 0.0;
 
@@ -735,19 +727,16 @@ int main() {
                     vector<double> next_y_vals;
 
                     // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-
-                    struct Ego ego_ = ego;
-                    struct Ego ego_prev = ego;
+                    struct Ego ego_prev;
+                    memcpy(&ego_prev, &ego, sizeof(Ego));
 
                     int prev_size = previous_path_x.size();
                     int cur_lane = calculateLane(car_d0);
                     double curvature = getRoadCurvature(car_x, car_y, car_yaw, map_waypoints_x, map_waypoints_y);
 
                     bool too_close_ahead = false;
-                    bool too_close_behind = false;
-                    double check_car_ahead_s = 60.0;
+                    double check_car_ahead_s = 0.0;
                     double check_car_ahead_vs = 49.5;
-                    double check_car_behind_vs = 49.5;
 
                     if (prev_size > 0){
                         car_d = end_path_d;
@@ -770,7 +759,7 @@ int main() {
                             check_car_s = check_car_s0 + ((double)prev_size*0.02*check_speed); // when ego gets to the end of
                             // the previous trajectory, where would the other car be
 
-                            if ((ego.state == "KL") && (check_car_s > car_s) && (check_car_s - car_s < 30) && (check_car_s0 > car_s0)){
+                            if ((ego.state == "KL") && (((check_car_s > car_s) && (check_car_s - car_s < 75))||(check_car_s <= car_s)) && (check_car_s0 > car_s0) && (check_speed * 2.24 < 45.0)){
 
                                 too_close_ahead = true;
                                 // determine the speed of the first car ahead
@@ -780,30 +769,16 @@ int main() {
                                     check_car_ahead_s = check_car_s0;
                                 }
                             }
-
-                            if(((check_car_s < car_s) && (car_s - check_car_s < 15) && (check_car_s0 < car_s0))){
-                                too_close_behind = true;
-                                check_car_behind_vs = check_speed * 2.24;
-                            }
                         }
                     }
 
-//                    if ((too_close_ahead)&&(ego.state=="KL")){
-//                        ref_v -= 0.25;
-//                    } else if (ref_v < 49.5 ){
-//                        ref_v += 0.25; // more efficient if done in below
-//                    }
-//
-//                    ref_v = min(ref_v, 49.5);
-
                     if((too_close_ahead)&&(ego.state=="KL")){
                         ref_v = check_car_ahead_vs;
-                        cout << "ref_v changes" << endl;
                     } else {
                         ref_v = 49.5;
                     }
 
-                    cout << "car_v: " << car_speed << " ref_v: " << ref_v << endl;
+                    cout << "v: " << car_speed << " end_v: " << ego.ego_prev_path_end_v << " ref_v: " << ref_v << " prev_path_size: " << prev_size << endl;
 
                     vector<double> ptsx;
                     vector<double> ptsy;
@@ -858,48 +833,62 @@ int main() {
                         vector<double> costs;
                         double cost = 9999;
 
-                        anchors = generateAnchors(car_s, sensor_fusion, cur_lane, car_speed/2.24);
+                        anchors = generateAnchors(car_s, sensor_fusion, cur_lane, ego.ego_prev_path_end_v/2.24);
 
+
+                        double ego_end_v_copy = ego.ego_prev_path_end_v;
+                        double ego_goal_s_copy = ego.goal_s;
 
                         for (auto anchor: anchors) {
+
+                            double temp_ego_end_v = ego_end_v_copy;
 
                             vector<vector<double>> temp_trajectory;
                             int temp_lane = calculateLane(anchor[1]);
 
-                            temp_trajectory = generateTrajectory(anchor, previous_path_x, previous_path_y, ego.ego_prev_path_end_v, ref_v, temp_lane,
+                            temp_trajectory = generateTrajectory(anchor, previous_path_x, previous_path_y, temp_ego_end_v, ref_v, temp_lane,
                                                                  map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
                             vector<vector<double>> ego_readings;
-                            ego_readings = getTrajectoryReadings(temp_trajectory, map_waypoints_x, map_waypoints_y);
+                            ego_readings = getTrajectoryReadings(temp_trajectory, map_waypoints_x, map_waypoints_y); // takes long to run
 
-                            double temp_cost = calculateCost(temp_trajectory, ego_readings, sensor_fusion, cur_lane,
-                                                             temp_lane, check_car_ahead_vs/2.24, check_car_ahead_s, map_waypoints_x, map_waypoints_y);
+//                            double temp_cost = calculateCost(temp_trajectory, ego_readings, sensor_fusion, cur_lane,
+//                                                             temp_lane, check_car_ahead_vs/2.24, check_car_ahead_s, map_waypoints_x, map_waypoints_y);
+//
+//                            costs.push_back(temp_cost);
 
-                            costs.push_back(temp_cost);
-
-                            if (temp_cost < cost){
-                                cost = temp_cost;
-                                trajectory = temp_trajectory;
-                                anchor_lane = calculateLane(anchor[1]);
-                                ego.goal_s = ego_readings[0][ego_readings[0].size()-1];
-                            }
+//                            if (temp_cost < cost){
+//                                cost = temp_cost;
+//                                trajectory = temp_trajectory;
+//                                anchor_lane = calculateLane(anchor[1]);
+//                                ego.goal_s = ego_readings[0][ego_readings[0].size()-1];
+//                                ego.ego_prev_path_end_v = temp_ego_end_v;
+//                            }
                         }
 
-                        if (cost >= 10) {
-                            goto KL;
-                        }else if (anchor_lane < cur_lane){
-                            ego.state = "PLCL";
-                            cout << ego.state << endl;
-                            cout << "LCL started" << endl;
-                            ego.state = "LCL";
-                            ego.goal_lane = anchor_lane;
-                        } else {
-                            ego.state = "PLCR";
-                            cout << ego.state << endl;
-                            cout << "LCR started" << endl;
-                            ego.state = "LCR";
-                            ego.goal_lane = anchor_lane;
-                        }
+                        cout << "go to KL" << endl;
+//                        ego = ego_prev;
+                        memcpy(&ego, &ego_prev, sizeof(Ego));
+                        goto KL;
+
+//                        if (cost >= 10) {
+//                            cout << "Cost too big...KL" << endl;
+//                            ego = ego_prev;
+//                            goto KL;
+//                        }else if (anchor_lane < cur_lane){
+//                            ego.state = "PLCL";
+//                            cout << ego.state << endl;
+//                            cout << "LCL started" << endl;
+//                            ego.state = "LCL";
+//                            ego.goal_lane = anchor_lane;
+//
+//                        } else {
+//                            ego.state = "PLCR";
+//                            cout << ego.state << endl;
+//                            cout << "LCR started" << endl;
+//                            ego.state = "LCR";
+//                            ego.goal_lane = anchor_lane;
+//                        }
 
                     } else {
                         KL:
@@ -908,7 +897,7 @@ int main() {
                                                         map_waypoints_s, map_waypoints_x, map_waypoints_y);
                     }
 
-                    if (ego_.state != ego.state)
+                    if (ego_prev.state != ego.state)
                         cout << ego.state << " from " << cur_lane <<" to " << ego.goal_lane << endl;
 
                     // TODO: end
