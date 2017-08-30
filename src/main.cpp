@@ -508,7 +508,7 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
 
     double closest_dist_ahead = 999;
 
-    int timesteps = prev_size+5;
+    int timesteps = 75;
     double center_line; // line between current lane and goal lane
     double s_i = 0.0;
 
@@ -540,7 +540,7 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
 
         // check collision, by the time ego is close to the center line, how distant are other cars?
         if(//abs(check_car_s_i - s_i) < 15.0 &&
-           ((check_car_s_i > s_i && check_car_s_i - s_i < 30) || (check_car_s_i < s_i && s_i - check_car_s_i < 5))
+           ((check_car_s_i > s_i && check_car_s_i - s_i < 30) || (check_car_s_i < s_i && s_i - check_car_s_i < 10))
            && ego_goal_lane == check_car_lane){
             colli = 10.0;
             goto Out;
@@ -574,7 +574,8 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
     // check to see if traffic around the slow car in goal lane is any faster
     for(int i = 0; i < car_ahead_id.size(); i++){
 
-        if (abs(slow_car_s - car_ahead_s[i]) < 15.0 && car_ahead_v[i]/slow_car_speed < 1.15){
+        if (((slow_car_s - car_ahead_s[i] < 20.0 && slow_car_s > car_ahead_s[i]) || (car_ahead_s[i] - slow_car_s < 10.0 && slow_car_s < car_ahead_s[i]))
+            && car_ahead_v[i]/slow_car_speed < 1.15){
             baffled = 10.0;
             cout << "Lane " << ego_goal_lane << " baffling" << endl;
             goto Out;
@@ -591,8 +592,8 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
         }
     }
 
-    if(ego_vxy_max * 2.24 > 49.5||ego_vsd_max * 2.24 > 49.5)
-        v_lim = 1.0;
+    if(ego_vxy_max * 2.24 > 49.5)
+        v_lim = 10.0;
     if(ego_axy_max > 10.0 || ego_asd_max > 10.0)
         a_lim = 1.0;
     if(ego_jxy_max > 50.0 || ego_jsd_max > 50.0)
@@ -748,19 +749,20 @@ int main() {
                         }
                     }
 
-                    if (too_close_ahead ){
+                    if (too_close_ahead && ego.goal_lane == cur_lane){
                         ref_v -= 0.25;
-                    } else if (ref_v < 49.8 ){
+                    } else if (ref_v < 49.9){
                         ref_v += 0.25; // more efficient if done in below
                     }
 
-                    ref_v = min(ref_v, 49.8);
+                    ref_v = max(min(ref_v, 49.9), 2.0);
 
                     vector<double> ptsx;
                     vector<double> ptsy;
 
                     // makes sure that previous_path has 2 points at least
                     if(prev_size < 2){
+
                         // create points tangent to the car
                         double prev_car_x = car_x - cos(deg2rad(car_yaw)) ;
                         double prev_car_y = car_y - sin(deg2rad(car_yaw));
