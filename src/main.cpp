@@ -198,7 +198,7 @@ vector<double> getFrenetFromTrajectory(vector<vector<double>> trajectory, vector
 // Get trajectory readings s[], d[], v[], a[], j[], given a trajectory (x[],y[])
 vector<vector<double>> getTrajectoryReadings(vector<vector<double>> trajectory, vector<double> maps_x, vector<double> maps_y){
 
-    vector<double> x, y, theta, s, d, vx, vy, vxy, vs, vd, vsd, ax, ay, axy, as, ad, asd, jx, jy, jxy, js, jd, jsd;
+    vector<double> x, y, theta, s, d, vx, vy, vxy, ax, ay, axy, jx, jy, jxy;
 
     for(int i = 0; i < trajectory.size(); i++){
         x.push_back(trajectory[i][0]);
@@ -216,53 +216,38 @@ vector<vector<double>> getTrajectoryReadings(vector<vector<double>> trajectory, 
         }
 
         for (int j = 0; j < s.size()-1; j ++){
-            double temp_vs = (s[j+1]-s[j])/0.02;
-            double temp_vd = (d[j+1]-d[j])/0.02;
             double temp_vx = (x[j+1]-x[j])/0.02;
             double temp_vy = (y[j+1]-y[j])/0.02;
 
-            vs.push_back(temp_vs);
-            vd.push_back(temp_vd);
             vx.push_back(temp_vx);
             vy.push_back(temp_vy);
 
-            vsd.push_back(sqrt(temp_vs*temp_vs + temp_vd*temp_vd));
             vxy.push_back(sqrt(temp_vx*temp_vx + temp_vy*temp_vy));
         }
 
-        for (int j = 0; j < vs.size()-1; j ++){
-            double temp_as = (vs[j+1]-vs[j])/0.02;
-            double temp_ad = (vd[j+1]-vd[j])/0.02;
+        for (int j = 0; j < vx.size()-1; j ++){
             double temp_ax = (vx[j+1]-vx[j])/0.02;
             double temp_ay = (vy[j+1]-vy[j])/0.02;
 
-            as.push_back(temp_as);
-            ad.push_back(temp_ad);
             ax.push_back(temp_ax);
             ay.push_back(temp_ay);
 
-            asd.push_back(sqrt(temp_as*temp_as + temp_ad*temp_ad));
             axy.push_back(sqrt(temp_ax*temp_ax + temp_ay*temp_ay));
         }
 
-        for (int j = 0; j < as.size()-1; j ++){
-            double temp_js = (as[j+1]-as[j])/0.02;
-            double temp_jd = (ad[j+1]-ad[j])/0.02;
+        for (int j = 0; j < ax.size()-1; j ++){
             double temp_jx = (ax[j+1]-ax[j])/0.02;
             double temp_jy = (ay[j+1]-ay[j])/0.02;
 
-            js.push_back(temp_js);
-            jd.push_back(temp_jd);
             jx.push_back(temp_jx);
             jy.push_back(temp_jy);
 
-            jsd.push_back(sqrt(temp_js*temp_js + temp_jd*temp_jd));
             jxy.push_back(sqrt(temp_jx*temp_jx + temp_jy*temp_jy));
         }
 
     }
 
-    return {s, d, vsd, vxy, asd, axy, jsd, jxy};
+    return {s, d, vxy, axy, jxy};
 }
 
 // Fit polynomial
@@ -490,17 +475,14 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
     vector<double> s, d, vsd, vxy, asd, axy, jsd, jxy;
     s = ego_readings[0];
     d = ego_readings[1];
-    vsd = ego_readings[2];
-    vxy = ego_readings[3];
-    asd = ego_readings[4];
-    axy = ego_readings[5];
-    jsd = ego_readings[6];
-    jxy = ego_readings[7];
+    vxy = ego_readings[2];
+    axy = ego_readings[3];
+    jxy = ego_readings[4];
 
     double ego_end_s = s[s.size()-1];
-    double ego_vsd_max = maxofVector(vsd), ego_vxy_max = maxofVector(vxy);
-    double ego_asd_max = maxofVector(asd), ego_axy_max = maxofVector(asd);
-    double ego_jsd_max = maxofVector(jsd), ego_jxy_max = maxofVector(jsd);
+    double ego_vxy_max = maxofVector(vxy);
+    double ego_axy_max = maxofVector(axy);
+    double ego_jxy_max = maxofVector(jxy);
     double ego_vxy_mean = meanOfVector(vxy);
 
     double colli = 0.0, buffer = 0.0, v_lim = 0.0, a_lim = 0.0, j_lim = 0.0, effi = 0.0, road_lim = 0.0, baffled = 0.0;
@@ -513,8 +495,6 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
 
     int timesteps = 75;
     double center_line; // line between current lane and goal lane
-    double s_i = 0.0;
-    int pre_steps = 0;
 
     if(ego_goal_lane < ego_cur_lane){
         center_line = ego_cur_lane*4;
@@ -524,15 +504,11 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
 
     // find out the time steps it takes for ego to go to the edge of its lane
     for (int i = 0; i < s.size(); i ++){
-        if (abs(d[i]-center_line)<1.5){
+        if (abs(d[i]-center_line)<0.5){
             timesteps = i;
-            s_i = s[i];
-            pre_steps = i;
             break;
         }
     }
-
-
 
     for(auto sf: sensor_fusion){
 
@@ -543,21 +519,13 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
         double check_car_d = sf[6];
         int check_car_lane = calculateLane(check_car_d);
 
-        double check_car_s_i = check_car_s0 + ((double)timesteps * 0.02 * check_car_speed);
-
-        // check collision, by the time ego is close to the center line, how distant are other cars?
-        if(//abs(check_car_s_i - s_i) < 15.0 &&
-                ((check_car_s_i > s_i && check_car_s_i - s_i < 40) || (check_car_s_i < s_i && s_i - check_car_s_i < 20))
-                && ego_goal_lane == check_car_lane){
-            colli = 10.0;
-            goto Out;
-        }
-
-        for (int i=0; i < pre_steps; i++){
+        for (int i=0; i < timesteps; i++){
             double check_car_si = check_car_s0 + ((double)i * 0.02 * check_car_speed);
-            if(s[i]>check_car_si && s[i]-check_car_si<15){
-                colli = 10.0;
-                goto Out;
+            if(ego_goal_lane == check_car_lane){
+                if((s[i]>check_car_si && s[i]-check_car_si<10) || (s[i]<check_car_si && check_car_si-s[i]<20)){
+                    colli = 10.0;
+                    goto Out;
+                }
             }
         }
 
@@ -609,9 +577,9 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
 
     if(ego_vxy_max * 2.24 > 49.5)
         v_lim = 10.0;
-    if(ego_axy_max > 10.0 || ego_asd_max > 10.0)
+    if(ego_axy_max > 10.0)
         a_lim = 1.0;
-    if(ego_jxy_max > 50.0 || ego_jsd_max > 50.0)
+    if(ego_jxy_max > 50.0)
         j_lim = 1.0;
 
     effi = logistic(abs(49.5 - ego_vxy_mean * 2.24)/50.0);
@@ -724,9 +692,11 @@ int main() {
                     double curvature = getRoadCurvature(car_x, car_y, car_yaw, map_waypoints_x, map_waypoints_y);
 
                     bool too_close_ahead = false;
-                    double check_car_ahead_s = 60.0;
+                    double check_car_ahead_s0 = car_s0+60.0;
+                    double check_car_ahead_s = car_s+60.0;
                     double check_car_ahead_vs = 49.5;
                     bool maybe_bump = false;
+                    bool check_lane_changing_car = false;
 
                     if (prev_size > 0){
                         car_d = end_path_d;
@@ -737,46 +707,58 @@ int main() {
                     for (int i = 0; i < sensor_fusion.size(); i ++){
                         float d = sensor_fusion[i][6];
                         double closest_distance = 100.0;
+                        double vx = sensor_fusion[i][3];
+                        double vy = sensor_fusion[i][4];
+                        double check_speed = sqrt(vx * vx + vy * vy);
+                        double check_car_s0 = sensor_fusion[i][5];
+                        double check_car_s;
+                        int check_car_lane = calculateLane(d);
 
                         if (d > 4 * cur_lane & d < 4 * (cur_lane + 1)){
-
-                            double vx = sensor_fusion[i][3];
-                            double vy = sensor_fusion[i][4];
-                            double check_speed = sqrt(vx * vx + vy * vy);
-                            double check_car_s0 = sensor_fusion[i][5];
-                            double check_car_s;
 
                             check_car_s = check_car_s0 + ((double)prev_size*0.02*check_speed); // when ego gets to the end of
                             // the previous trajectory, where would the other car be
 
                             if ( (check_car_s0 > car_s0) && ((check_car_s >= car_s && check_car_s - car_s < 40)||(check_car_s < car_s))){
 
-                                if (check_car_s0 - car_s0 < 40){
-                                    too_close_ahead = true;
-                                    if (check_car_s0 - car_s0 < 5)
-                                        maybe_bump = true;
-                                }
+//                                if (check_car_s0 - car_s0 < 30){
+                                too_close_ahead = true;
+                                if (check_car_s0 - car_s0 < 5)
+                                    maybe_bump = true;
+//                                }
 
                                 // determine the speed of the first car ahead
                                 if ((check_car_s - car_s) < closest_distance){
                                     closest_distance = check_car_s - car_s;
                                     check_car_ahead_vs = check_speed; // m/s
-                                    check_car_ahead_s = check_car_s0;
+                                    check_car_ahead_s0 = check_car_s0;
+                                    check_car_ahead_s = check_car_s;
                                 }
                             }
+                        }
+
+                        if (check_car_lane!=cur_lane && abs(d - car_d0) < 3 && ego.state == "KL" &&
+                                ((check_car_s0-car_s0 < 60 && check_car_s0 >= car_s0)||(check_car_s0 < car_s0 && car_s0-check_car_s0 < 10))){
+                            check_lane_changing_car = true;
+                            cout <<"Lane changing car!" << endl;
                         }
                     }
 
                     double min_speed = 2.0;
-                    if (too_close_ahead && ego.goal_lane == cur_lane){
+                    double max_speed = 49.95;
+                    if (check_lane_changing_car){
                         ref_v -= 0.25;
-                        if (check_car_ahead_s - car_s0 > 15 && check_car_ahead_vs > 14.0/2.24)
-                            min_speed = check_car_ahead_vs+5;
-                    } else if (ref_v < 49.9){
+                    }
+                    else if (too_close_ahead && ego.goal_lane == cur_lane){
+                        ref_v -= 0.25;
+                        if (check_car_ahead_s - car_s >= 30 && !check_lane_changing_car && check_car_ahead_s0 - car_s0 > 15){ // check_car_ahead_vs > 15.0/2.24 &&
+                            ref_v += 0.25;
+                        }
+                    } else if (ref_v < max_speed){
                         ref_v += 0.25; // more efficient if done in below
                     }
 
-                    ref_v = max(min(ref_v, 49.9), min_speed);
+                    ref_v = max(min(ref_v, max_speed), min_speed);
 
                     vector<double> ptsx;
                     vector<double> ptsy;
@@ -824,7 +806,7 @@ int main() {
                             trajectory = generateTrajectory({car_s, car_d}, previous_path_x, previous_path_y, ref_v, ego.goal_lane,
                                                             map_waypoints_s, map_waypoints_x, map_waypoints_y);
                         }
-                    } else if (car_speed < 45 && (too_close_ahead) && (check_car_ahead_vs < 45.0/2.24) && curvature > 800.0 && (!maybe_bump)) {
+                    } else if (car_speed < 45 && (too_close_ahead) && (check_car_ahead_vs < 45.0/2.24)  && (!maybe_bump)) { // && curvature > 800.0
 
                         // abs(car_speed-check_car_ahead_vs*2.24)<2
                         cout << "Choosing ..." << endl;
@@ -848,7 +830,7 @@ int main() {
                             ego_readings = getTrajectoryReadings(temp_trajectory, map_waypoints_x, map_waypoints_y);
 
                             double temp_cost = calculateCost(temp_trajectory, ego_readings, sensor_fusion, cur_lane,
-                                                             temp_lane, check_car_ahead_vs, check_car_ahead_s, prev_size);
+                                                             temp_lane, check_car_ahead_vs, check_car_ahead_s0, prev_size);
 
                             costs.push_back(temp_cost);
 
