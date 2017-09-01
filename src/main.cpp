@@ -372,9 +372,12 @@ vector<vector<double>> generateAnchors(double car_s, vector<vector<double>> sens
                         double t = time_to_pass[i];
 
                         for(auto sf: cars_in_lane_sf){
+                            double s = sf[5] + t * sqrt(sf[3] * sf[3] + sf[4] * sf[4]);
                             if(sf[0] != pass_id[i]){
-                                double s = sf[5] + t * sqrt(sf[3] * sf[3] + sf[4] * sf[4]);
-                                if (m > s && m - s < 30)
+                                if ((m > s && m - s < 30) || (m <= s && s - m < 15))
+                                    ok_to_drop = false;
+                            } else{
+                                if (m - s < 10)
                                     ok_to_drop = false;
                             }
                         }
@@ -511,6 +514,7 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
     int timesteps = 75;
     double center_line; // line between current lane and goal lane
     double s_i = 0.0;
+    int pre_steps = 0;
 
     if(ego_goal_lane < ego_cur_lane){
         center_line = ego_cur_lane*4;
@@ -523,9 +527,12 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
         if (abs(d[i]-center_line)<1.5){
             timesteps = i;
             s_i = s[i];
+            pre_steps = i;
             break;
         }
     }
+
+
 
     for(auto sf: sensor_fusion){
 
@@ -544,6 +551,14 @@ double calculateCost(vector<vector<double>> trajectory, vector<vector<double>> e
                 && ego_goal_lane == check_car_lane){
             colli = 10.0;
             goto Out;
+        }
+
+        for (int i=0; i < pre_steps; i++){
+            double check_car_si = check_car_s0 + ((double)i * 0.02 * check_car_speed);
+            if(s[i]>check_car_si && s[i]-check_car_si<15){
+                colli = 10.0;
+                goto Out;
+            }
         }
 
         // check both cur_lane and goal_lane for collision and update buffer
@@ -755,8 +770,8 @@ int main() {
                     double min_speed = 2.0;
                     if (too_close_ahead && ego.goal_lane == cur_lane){
                         ref_v -= 0.25;
-                        if (check_car_ahead_s - car_s0 > 15 && check_car_ahead_vs > 14.0)
-                            min_speed = check_car_ahead_vs-2;
+                        if (check_car_ahead_s - car_s0 > 15 && check_car_ahead_vs > 14.0/2.24)
+                            min_speed = check_car_ahead_vs+5;
                     } else if (ref_v < 49.9){
                         ref_v += 0.25; // more efficient if done in below
                     }
